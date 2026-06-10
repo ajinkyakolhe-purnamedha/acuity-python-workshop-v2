@@ -1,0 +1,26 @@
+# Module 9 · Sections 2–3 — the GitHub Actions workflow.
+# In a real repo this lives at  .github/workflows/tests.yml  and runs on every push.
+# (Shown here as a code-along artifact; CI runs on GitHub, not in the room.)
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]   # 2.3 · the matrix
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      # 1.2 coverage + 3.1 reports + 3.2 the threshold, in one command:
+      - run: pytest --cov=catalog --cov-report=term-missing --cov-fail-under=85 --junitxml=results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: results.xml
