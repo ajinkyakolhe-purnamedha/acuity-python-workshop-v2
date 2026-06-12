@@ -411,7 +411,7 @@ Stop testing prose. Start testing shape and behaviour.
 4. Golden evals   ─ a file of cases that lock behaviour
 ```
 
-**Three of the four need no API key** — CI never pays OpenAI. Only the optional live eval does.
+**All four run without an API key** — CI never pays OpenAI. Only an optional live eval does.
 
 ---
 
@@ -515,7 +515,7 @@ class TestGoldenQueries:
 
 `@pytest.mark.eval` (a Day-3 custom marker) lets you run *just* these: `pytest -m eval`.
 
-<div class="code-along">▶ Code-along now → notebook: module-12 cell 10 — mock the LLM with side_effect, assert the tool sequence, then parametrize the golden file</div>
+<div class="code-along">▶ Code-along now → notebook: module-12 golden-evals section — mock the LLM with side_effect, assert the tool sequence, then parametrize the golden file</div>
 
 ---
 
@@ -533,6 +533,109 @@ class TestGoldenQueries:
 ```
 
 One green check covers the whole stack — Python, API, and AI.
+
+---
+
+# 12.10 · Production-ready AI app shape
+
+An AI app is still an app. The LLM is one component inside a normal system boundary:
+
+```text
+UI / CLI
+  ↓
+application service
+  ↓
+agent / structured LLM call
+  ↓
+tools = APIClient methods
+  ↓
+database / external systems
+```
+
+The production question is not "is the model smart?" It is:
+**can we control, observe, test, and recover from what the model does?**
+
+---
+
+# 12.11 · Reliability boundaries
+
+Separate what must be deterministic from what can be flexible:
+
+| Deterministic | Flexible |
+|---|---|
+| tool functions | final wording |
+| Pydantic schemas | explanation style |
+| validation errors | reasoning path |
+| max step limits | model phrasing |
+| write confirmations | answer tone |
+
+Design rule: **probabilistic model inside deterministic rails.**
+
+---
+
+# 12.12 · Observe every AI step
+
+If production breaks, you need a trace:
+
+```python
+logger.info("agent_step", extra={
+    "request_id": request_id,
+    "model": self.model,
+    "step": step,
+    "tool": call.function.name,
+    "arguments": call.function.arguments,
+    "latency_ms": latency_ms,
+})
+```
+
+Log: prompt id, model, tool calls, arguments, observations, final answer, latency, token cost.
+
+No trace = no debugging. No debugging = no reliable AI app.
+
+---
+
+# 12.13 · Human-in-the-loop for writes
+
+Not all tools carry the same risk:
+
+| Tool type | Example | Policy |
+|---|---|---|
+| Read | `list_products` | call directly |
+| Search | `search_products` | call directly |
+| Update | `update_price` | ask for confirmation |
+| Delete | `delete_product` | require confirmation + audit |
+
+Pattern:
+
+```text
+LLM proposes action → app shows diff → user confirms → tool executes
+```
+
+The model can recommend. Your application decides.
+
+---
+
+# 12.14 · Eval ladder for AI apps
+
+Start cheap and deterministic; add live checks only where they earn their keep:
+
+```text
+unit tests
+  ↓
+schema tests
+  ↓
+mocked loop tests
+  ↓
+golden evals
+  ↓
+optional live LLM evals
+  ↓
+production monitoring
+```
+
+Every bug becomes either a test, a golden case, or a monitor.
+
+That is how an AI demo becomes an AI application.
 
 ---
 

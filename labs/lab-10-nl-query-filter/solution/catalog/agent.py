@@ -7,13 +7,12 @@ One LLM call. No agent loop, no tools — that's Lab 11.
 
 This is the reference answer for `starter/catalog/agent.py`: the two function
 bodies (`parse_nl_query`, `apply_query`) are filled in; everything else matches
-the starter. Defaults to a local Ollama model — no API key needed.
+the starter. Uses the OpenAI API (set OPENAI_API_KEY).
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional, Protocol
 
 from pydantic import BaseModel, Field, ValidationError
@@ -32,25 +31,10 @@ class LLMClient(Protocol):
     chat: Any
 
 
-# LLM backend defaults to a LOCAL Ollama server (OpenAI-compatible): no API key,
-# no cost. The lab code below is unchanged -- we only point the SAME OpenAI SDK at
-# a different base_url. That is the whole "inject the dependency" lesson in one line.
-DEFAULT_MODEL = os.getenv("LLM_MODEL", "qwen2.5:3b")
-
-
 def default_openai_client() -> LLMClient:
-    """OpenAI-SDK client, pointed at a local Ollama server by default. Overrides:
-      * LLM_BASE_URL=<url>                     -> any OpenAI-compatible endpoint
-      * OPENAI_API_KEY set (no LLM_BASE_URL)   -> real OpenAI
-      * neither set                            -> local Ollama (http://localhost:11434/v1)
-    """
+    """Construct a real OpenAI client. Requires OPENAI_API_KEY in env."""
     from openai import OpenAI  # local import — only needed when we run real
-    base_url = os.getenv("LLM_BASE_URL")
-    if base_url:                                    # explicit endpoint wins
-        return OpenAI(base_url=base_url, api_key=os.getenv("OPENAI_API_KEY", "ollama"))
-    if os.getenv("OPENAI_API_KEY"):                 # real key -> real OpenAI
-        return OpenAI()
-    return OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")  # local default
+    return OpenAI()
 
 
 # ============================================================
@@ -95,7 +79,7 @@ NL_QUERY_SYSTEM = (
 
 
 def parse_nl_query(prompt: str, llm_client: Optional[LLMClient] = None,
-                   *, model: str = DEFAULT_MODEL) -> CatalogQuery:
+                   *, model: str = "gpt-4o-mini") -> CatalogQuery:
     """Convert a free-form question into a validated CatalogQuery (one LLM call)."""
     client = llm_client or default_openai_client()
     response = client.chat.completions.create(

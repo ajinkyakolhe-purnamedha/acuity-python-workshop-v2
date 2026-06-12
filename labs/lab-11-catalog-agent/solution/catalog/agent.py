@@ -1,40 +1,21 @@
-"""LLM-powered Catalog Agent (Day 4) — Lab 11 STARTER.
+"""LLM-powered Catalog Agent (Day 4) — Lab 11 SOLUTION (answer key).
 
-You start here with Lab 10 already done: `CatalogQuery`, `parse_nl_query`,
-and `apply_query` are GIVEN below (you built them last lab — no need to
-retype). The plumbing (`ToolSpec`, `ToolRegistry`, the result dataclasses)
-is also given.
+The reference answer for `starter/catalog/agent.py`: the three CatalogAgent
+methods are filled in —
 
-YOUR JOB this lab — fill the three `NotImplementedError` / `# TODO` pieces:
+  * `_build_registry`  — registers the FOUR tools over the Day-2 APIClient
+  * `ask`              — the plan → act → observe loop, with tool_call_id chaining
+  * `_invoke_tool`     — looks up + runs one tool, returns result or {"error": ...}
 
-  * `CatalogAgent._build_registry`  — register the FOUR tools
-  * `CatalogAgent.ask`              — the plan → act → observe loop
-  * `CatalogAgent._invoke_tool`     — look up + run a tool, return its result
-
-## The Tool/Agent loop
-
-    user prompt
-        │
-        ▼
-    LLM(messages, tools)
-        │
-        ├── tool_calls? ──> run each tool, append observation, loop
-        │
-        └── final answer  ──> return AgentResult
-
-## Why the LLM client is injected
-
-`CatalogAgent(api_client, llm_client=...)` accepts any object that quacks
-like `openai.OpenAI` (i.e. has `.chat.completions.create(...)`). That's the
-seam tests use to mock the LLM — exactly the same pattern Day 3 used to
-mock `requests.Session`. Uses the OpenAI API (set OPENAI_API_KEY).
+Everything else (CatalogQuery + parse_nl_query + apply_query from Lab 10, and
+the ToolSpec/ToolRegistry plumbing) matches the starter. Uses the OpenAI API
+(set OPENAI_API_KEY).
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol
 
@@ -159,7 +140,7 @@ class AgentResult:
 
 
 # ============================================================
-# CatalogAgent — YOU build the three marked methods
+# CatalogAgent — the three marked methods, FILLED IN
 # ============================================================
 
 SYSTEM_PROMPT = (
@@ -191,56 +172,134 @@ class CatalogAgent:
     def _build_registry(self) -> ToolRegistry:
         registry = ToolRegistry()
 
-        # TODO: register the four tools on `registry` using @registry.tool(...).
-        #   Each decorated function calls self.api and returns JSON-friendly
-        #   values (dicts/lists of dicts — model_dump() your Products!).
-        #
-        #   1. list_products()            -> [p.model_dump() for p in self.api.list_products()]
-        #        params: {"type": "object", "properties": {}, "additionalProperties": False}
-        #   2. search_products(term)      -> products whose name contains `term` (case-insensitive)
-        #        params: term: string (required)
-        #   3. count_by_category()        -> self.api.count_by_category()
-        #        params: {} (none)
-        #   4. update_price(product_id, new_price) -> self.api.update_product(...).model_dump()
-        #        params: product_id: integer, new_price: number (>= 0) (both required)
-        #
-        # Example shape (Day-1/2 M5 decorators return — the registry stamps
-        # metadata onto each function and stores a ToolSpec):
-        #
-        #   @registry.tool(
-        #       name="list_products",
-        #       description="Return every product in the catalog as a list of dicts.",
-        #       parameters={"type": "object", "properties": {}, "additionalProperties": False},
-        #   )
-        #   def list_products() -> list[dict]:
-        #       return [p.model_dump() for p in self.api.list_products()]
+        @registry.tool(
+            name="list_products",
+            description="Return every product in the catalog as a list of dicts.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        )
+        def list_products() -> list[dict]:
+            return [p.model_dump() for p in self.api.list_products()]
 
-        return registry  # currently empty — register the four tools above first
+        @registry.tool(
+            name="search_products",
+            description="Find products whose name contains the given substring (case-insensitive).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "term": {"type": "string", "description": "Substring to search for."},
+                },
+                "required": ["term"],
+                "additionalProperties": False,
+            },
+        )
+        def search_products(term: str) -> list[dict]:
+            term_lower = term.lower()
+            return [
+                p.model_dump() for p in self.api.list_products()
+                if term_lower in p.name.lower()
+            ]
+
+        @registry.tool(
+            name="count_by_category",
+            description="Return a dict mapping each category to its product count.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        )
+        def count_by_category() -> dict[str, int]:
+            return self.api.count_by_category()
+
+        @registry.tool(
+            name="update_price",
+            description="Set a product's price. Returns the updated product.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "product_id": {"type": "integer"},
+                    "new_price": {"type": "number", "minimum": 0},
+                },
+                "required": ["product_id", "new_price"],
+                "additionalProperties": False,
+            },
+        )
+        def update_price(product_id: int, new_price: float) -> dict:
+            from .models import ProductUpdate
+            return self.api.update_product(
+                product_id, ProductUpdate(price=new_price)
+            ).model_dump()
+
+        return registry
 
     # -------- the loop --------
 
     def ask(self, user_prompt: str) -> AgentResult:
-        raise NotImplementedError(
-            "TODO: plan→act→observe loop; see steps. "
-            "Seed messages with SYSTEM_PROMPT + the user turn, then loop up to "
-            "self.max_steps: call self.llm.chat.completions.create(model=, "
-            "messages=, tools=self.registry.openai_schemas()). No tool_calls -> "
-            "return AgentResult(answer, tool_calls=log, steps=step). Otherwise "
-            "append the assistant message (WITH its tool_calls), run each tool "
-            "via self._invoke_tool, and append a {'role':'tool', "
-            "'tool_call_id': call.id, ...} message for EACH call. "
-            "If you fall out of the loop, raise AgentError."
-        )
+        messages: list[dict] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        tool_call_log: list[ToolCallRecord] = []
+
+        for step in range(1, self.max_steps + 1):
+            response = self.llm.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=self.registry.openai_schemas(),
+            )
+            msg = response.choices[0].message
+            tool_calls = getattr(msg, "tool_calls", None) or []
+
+            if not tool_calls:                         # LLM answered → done
+                return AgentResult(
+                    answer=(msg.content or "").strip(),
+                    tool_calls=tool_call_log,
+                    steps=step,
+                )
+
+            # 1) append the ASSISTANT message *with* its tool_calls so the
+            #    tool replies below chain correctly …
+            messages.append({
+                "role": "assistant",
+                "content": msg.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in tool_calls
+                ],
+            })
+
+            # 2) … then ONE tool message per call, echoing that call's id.
+            for call in tool_calls:
+                result = self._invoke_tool(call.function.name, call.function.arguments)
+                tool_call_log.append(ToolCallRecord(
+                    tool=call.function.name,
+                    arguments=_parse_args(call.function.arguments),
+                    result=result,
+                ))
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.id,            # ← MUST match the assistant call
+                    "name": call.function.name,
+                    "content": json.dumps(result, default=str),
+                })
+
+        raise AgentError(f"agent did not converge in {self.max_steps} steps")
 
     def _invoke_tool(self, name: str, arguments_json: str) -> Any:
-        raise NotImplementedError(
-            "TODO: look up the tool, run it, return result or {'error':...}. "
-            "Wrap self.registry.get(name) in try/except KeyError -> "
-            "return {'error': f'unknown tool: {name!r}'}. Then _parse_args the "
-            "JSON string and call spec.fn(**kwargs). Wrap the call in try/except "
-            "Exception -> return {'error': f'{type(exc).__name__}: {exc}'} so the "
-            "LLM sees the failure instead of the loop crashing."
-        )
+        try:
+            spec = self.registry.get(name)
+        except KeyError:
+            logger.warning("LLM requested unknown tool: %s", name)
+            return {"error": f"unknown tool: {name!r}"}   # don't raise — let the LLM recover
+        kwargs = _parse_args(arguments_json)
+        try:
+            return spec.fn(**kwargs)
+        except Exception as exc:
+            logger.warning("tool %s raised %s", name, exc)
+            return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 def _parse_args(arguments_json: str) -> dict:
@@ -279,7 +338,6 @@ def parse_nl_query(prompt: str, llm_client: Optional[LLMClient] = None,
     try:
         return CatalogQuery.model_validate_json(raw)
     except ValidationError:
-        # Surface the raw output for debugging.
         logger.warning("LLM returned invalid CatalogQuery: %s", raw)
         raise
 

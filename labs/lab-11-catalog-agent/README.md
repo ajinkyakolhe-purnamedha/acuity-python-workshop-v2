@@ -4,15 +4,13 @@
 
 Concepts → `codealong/module-11.ipynb`. Tools are Python functions registered with a decorator (the M5 decorators return); the injected `llm_client` is the same seam Day-3 used for `requests.Session`.
 
-## Prereqs — local LLM, no API key
-
-Same as Lab 10 — a lightweight model on your laptop via [Ollama](https://ollama.com):
+## Prereqs — OpenAI API
 
 ```bash
-ollama pull qwen2.5:3b     # ~1.9 GB, supports tool-calling
-ollama serve               # http://localhost:11434
+pip install openai
+export OPENAI_API_KEY=sk-…       # your key
 ```
-Real OpenAI → `export OPENAI_API_KEY=sk-…`. Stronger model → `export LLM_MODEL=qwen2.5:7b`.
+The agent uses the OpenAI SDK with `tools=[...]` (function calling). The injected `llm_client` is the seam — Lab 12 swaps in a mock.
 
 ## Goal
 
@@ -46,7 +44,7 @@ You fill **three method bodies**; everything else is given.
    Same for `list_products` (no params), `count_by_category` (no params), `update_price(product_id, new_price)`. End `return registry`.
 3. **`ask` — the loop, with `tool_call_id` chaining** (the #1 breakage). Seed `messages` with `SYSTEM_PROMPT` + the user turn, loop to `max_steps`: call the LLM with `tools=…`; no `tool_calls` → return `AgentResult`. Else append the **assistant message with its `tool_calls`**, then **one `{"role":"tool","tool_call_id":call.id,…}` message per call**. Mismatch the id → the next call 400s. (Same loop as `module-11.ipynb` cell 7.)
 4. **`_invoke_tool` — run one tool, never crash.** `registry.get(name)` in try/except `KeyError` → `{"error":…}`; `_parse_args` the JSON; call `spec.fn(**kwargs)` in try/except → `{"error":…}`. The model reads the error and recovers.
-5. **Demo it** (Ollama + `uvicorn catalog.server:app` running):
+5. **Demo it** (with the API server running — `uvicorn catalog.server:app`):
    ```python
    from catalog.agent import CatalogAgent
    from catalog.client import APIClient
@@ -68,9 +66,9 @@ The model called `list_products` once, read the data, then answered. Both "answe
 - Missing/mismatched `tool_call_id` on the tool message → the next LLM call rejects the conversation. **The most common break.**
 - Re-creating the client every `ask()` — build it once in `__init__` (the injected `self.llm`).
 - Swallowing errors as `{}` in `_invoke_tool` → the model loops confused. Return `{"error":…}`.
-- **Small models fumble tool-calling.** `qwen2.5:3b` mostly works but may skip a tool or malformat args. If it won't call a tool, `export LLM_MODEL=qwen2.5:7b` — the loop code is identical.
+- `max_steps` mis-tuned — too small (3) gives up mid-task; too large (50) lets a bug spin. **5** is the default.
 
 ## Stretch
 
 - Add a `delete_product` tool + a **confirmation step**: the LLM proposes, your code asks y/n, executes only on yes.
-- You already swapped OpenAI → **Ollama** through the injection seam (only `default_openai_client()` changed). Swapping to Anthropic is the same move — registry + loop stay identical.
+- Swap OpenAI → Anthropic through the injection seam — only `default_openai_client()` and the message-format details change; the registry + loop stay identical because `llm_client` is just a duck-typed dependency.
