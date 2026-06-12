@@ -3,7 +3,7 @@
 Four classes, matching the four kinds of test an AI system needs:
 
 1. TestTools          — the tools are plain Python; test them deterministically
-2. TestStructuredOutputs — Pydantic schema validation of LLM JSON
+2. TestCatalogQuerySchema — Pydantic schema validation of LLM JSON
 3. TestAgentLoop      — mock the LLM, assert the loop calls the right tools in order
 4. TestGoldenQueries  — file-driven eval cases (parametrize from golden_queries.json)
 """
@@ -228,9 +228,14 @@ class TestAgentLoop:
             )),
             _llm_response(_llm_message(content="recovered")),
         ]
-        # Should not raise — agent records error as observation and keeps going.
-        with pytest.raises(KeyError):
-            agent.ask("call a bogus tool")
+        # An unknown tool name is recorded as an error observation, not raised,
+        # so the agent can see the failure and keep going.
+        result = agent.ask("call a bogus tool")
+        assert result.steps == 2
+        assert result.answer == "recovered"
+        assert result.tool_calls[0].tool == "does_not_exist"
+        assert "error" in result.tool_calls[0].result
+        assert "unknown tool" in result.tool_calls[0].result["error"]
 
 
 # ============================================================

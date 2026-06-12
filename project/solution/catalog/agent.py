@@ -306,7 +306,11 @@ class CatalogAgent:
         )
 
     def _invoke_tool(self, name: str, arguments_json: str) -> Any:
-        spec = self.registry.get(name)
+        try:
+            spec = self.registry.get(name)
+        except KeyError:
+            logger.warning("LLM requested unknown tool: %s", name)
+            return {"error": f"unknown tool: {name!r}"}
         kwargs = _parse_args(arguments_json)
         logger.info("tool call: %s(%s)", name, kwargs)
         try:
